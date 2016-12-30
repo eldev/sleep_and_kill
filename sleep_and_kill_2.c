@@ -20,22 +20,21 @@ inline static void kill_child(pid_t child_pid) {
 #define LINE_LENGTH 128
 #define STATE_STR "State:"
 
+static FILE *fopen_status_file(pid_t child_pid) {
+	char path[PATH_LENGTH];
+
+	snprintf(path, PATH_LENGTH, "/proc/%ld/status", (long)child_pid);
+	return fopen(path, "r");
+}
+
 /*
  * if child is alive, will return 1
  * else return 0
  */
-static int is_child_alive(pid_t child_pid) {
-	char path[PATH_LENGTH];
+static int is_child_alive(FILE *status_file) {
 	char line[LINE_LENGTH];
 	char *p;
-	FILE *status_file;
 
-	snprintf(path, PATH_LENGTH, "/proc/%ld/status", (long)child_pid);
-	status_file = fopen(path, "r");
-	if (!status_file) {
-		/* process has terminated already ? */
-		return 0;
-	}
 	while (fgets(line, LINE_LENGTH,	status_file)) {
 		if (strncmp(line, STATE_STR, strlen(STATE_STR)) != 0)
 			continue;
@@ -44,6 +43,8 @@ static int is_child_alive(pid_t child_pid) {
 			p++;
 		break;
 	}
+
+	/* child struct pid ref-- (?)*/
 	if (fclose(status_file) != 0)
 		perror("ERROR: fclose\n");
 
@@ -55,6 +56,7 @@ static int is_child_alive(pid_t child_pid) {
 }
 
 int main(int argc, char *argv[]) {
+	FILE *status_file;
 	pid_t child_pid;
 
 	if (argc == 1) {
@@ -78,10 +80,19 @@ int main(int argc, char *argv[]) {
 		}
 	}
 	else if (child_pid > 0) {
+		/* child struct pid ref++ (?) */
+		status_file = fopen_status_file(child_pid);
+
 		if (sleep(WAITING_TIME))
 			printf("Receive a signal which is not ignored\n");
 
-		if (is_child_alive(child_pid)) {
+		if (!status_file) {
+			perror("ERROR: fopen\n");
+			return -1;
+		}
+
+		/* In addition, is_child_alive() closes status file */
+		if (is_child_alive(status_file)) {
 			printf("Kill child process with pid=%d\n", child_pid);
 			kill_child(child_pid);
 		} else {
